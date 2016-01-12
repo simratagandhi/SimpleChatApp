@@ -1,0 +1,227 @@
+<html>
+<head>
+	<title>FSE Chat Room</title>
+	<link rel ="stylesheet"  href='style.css'> 
+</head>
+<body>
+	<div id="userNameWrap">
+		<div id="userNameMenu"><span class="menuText">FSE Chat Room - LOGIN</span></div>
+		<div class="usernameBox" align="center">
+		<p class="enterText">Enter username</p>		
+		<p id="userNameError"></p>
+			<form id="setUser">
+				<input type="text" id="username" size="35" placeholder="enter username (no special characters)" required pattern="[^~@#$!#%&<>^*()_+=[\]{}|\\/'|;,.?:-]+" maxlength="40"autofocus></input><br/>
+				<input type="submit" class="enterButton" value="Enter"></input>
+			</form>
+		</div>
+	</div>
+	
+	<div id="contentWrap">		
+		<div id="chatWrap">	
+			<div id="menu"><span class="menuText">FSE Chat Room</span>	
+				<input type="submit" value="Leave Chat Room" class="leave" onclick="eraseCookie('current-user')"></input>
+			</div>
+				<div id="currentUser"></div>
+					<div id="chatBox">
+						<div id="chat"></div>			
+					<form id="send-message">
+						<textarea name="typeMessage" id="typeMessage" rows="9"></textarea>
+					</div>
+					<div id="postbg">		
+						<input type="submit" id ="post" value="POST"></input>
+					</div>
+					</form>	
+		</div>
+		<!--	<div id="users"></div>-->
+	</div>
+
+	<!--  scripts to include jquery and socket.io files -->
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+	<script src="/socket.io/socket.io.js"></script>
+
+	<script>
+
+	//cookie create, read and delete functions  --> reference from quirksmode.org
+		function createCookie(name,value,days) {
+			if (days) {
+				var date = new Date();
+				date.setTime(date.getTime()+(days*24*60*60*1000));
+				var expires = "; expires="+date.toGMTString();
+					}
+				else var expires = "";
+				document.cookie = name+"="+value+expires+"; path=/";
+			}
+
+		function readCookie(name) {
+			var nameEQ = name + "=";
+			var ca = document.cookie.split(';');
+			for(var i=0;i < ca.length;i++) {
+				var c = ca[i];
+				while (c.charAt(0)==' ') c = c.substring(1,c.length);
+				if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+				}
+				return null;
+			} 
+
+		function eraseCookie(name) {
+			createCookie(name,"",-1);
+			location.reload(true);
+			}		
+
+		//Jquery functions
+		jQuery(function($){
+			var socket = io.connect();
+			var $userForm = $('#setUser');
+			var $userNameError = $('#userNameError');
+			var $userBox = $('#username');
+			var $users = $('#users');
+			var $messageForm = $('#send-message');
+			var $messageBox = $('#typeMessage');
+			var $chat = $('#chat');
+			var msgs_loaded = false;
+			var current_user ;
+			var displayUser;
+
+
+			$userBox.val('');
+
+			//refreshes chat when user switches tabs or windows
+			window.onfocus = function() { 
+    			var currentUser = readCookie('current-user');
+    			if (currentUser != current_user) 
+    				location.reload(true);			
+			};
+
+			//login function to check if its 1st time login & load all msgs
+			function login(user, is_new) {
+				socket.emit('login', user, is_new, function(did_login, docs){
+					if(did_login){
+						if (!msgs_loaded) {
+							for(var i=0; i<docs.length; i++){
+								displayMsg(docs[i]);				
+							} 
+							$('#userNameWrap').hide();
+							$('#contentWrap').show();
+							msgs_loaded = true;
+							$chat.scrollTop($chat[0].scrollHeight);
+							$messageBox.focus();
+						}	
+							createCookie('current-user', user,0);
+							console.log('current-user cookie: '+ user);
+							current_user=user;
+							displayUser = readCookie('display-user');
+					} else{
+						$userNameError.html('That username already exists!');
+					}
+				});
+			}
+
+			//tries login current user if session is on or user has not logged out
+			function tryLoginCurrentUser() {
+				var currentUser = readCookie('current-user');
+				displayUser = readCookie('display-user');
+				console.log('display-user cookie: '+readCookie('display-user'));
+				console.log('current user cookie: '+currentUser);
+					if (currentUser) {
+						login(currentUser, false);
+					}
+			}
+			
+			//on submit buton click- sends data in a socket to server
+			$userForm.submit(function(e){
+				e.preventDefault();
+				displayUser = $userBox.val().trim().replace(/\s+/g,' ');
+				createCookie('display-user', displayUser,0);
+				var name=displayUser.toLowerCase();
+				console.log('displayUser: '+displayUser);
+				console.log('name: '+name);
+				
+				if(!name){
+					$userNameError.html('Please enter a valid name!');
+					$userBox.val('');
+					return;
+				}
+				login(name, true);
+				$userBox.val('');
+				
+			});
+			
+			//to store all usernames and display current user
+			socket.on('usernames', function(data){
+				var namelist = '';
+				var currentUser = readCookie('current-user');
+				for(var i=0; i < data.length; i++){
+					namelist += data[i] + '<br/>'
+				}
+				$users.html(namelist);
+				$("#currentUser").html(displayUser);
+				
+			});
+			
+			//to format the date in specified format
+			function formattedDate() {
+				var d = new Date();
+				var date = ("0" + (d.getMonth() + 1)).slice(-2) + "." + ("0" + d.getDate()).slice(-2) + "." + d.getFullYear();
+				var hours = d.getHours();
+				var ampm = "AM";
+				if(hours == 0){
+					hours=12;
+				}else if (hours > 11) {
+					ampm = "PM";
+					if (hours > 12) {
+						hours -= 12;
+					}
+				}
+
+				var time = hours + ":" + ("0" + d.getMinutes()).slice(-2) + " " + ampm;
+				return date + " " + time;
+			}
+			//to send msg from client to server - 1st part
+			function sendMessage(){
+				var msg = $messageBox.val().trim();
+				if(msg){
+					socket.emit('send message', msg, formattedDate());
+				}
+				$messageBox.val('');
+			}
+			
+			//when user hits enter key and not shift+enter, calls send msg function to send msgs to server
+			$messageBox.keydown(function(e){
+				if (e.keyCode ==13 && !e.shiftKey) {
+					e.preventDefault();
+					sendMessage();
+				}
+			});
+
+			//when user click POST button, it calls send message function
+			$messageForm.submit(function(e){
+				e.preventDefault();
+				sendMessage();
+			});
+
+			//tries to login current user if user has not logged out
+			socket.on('try-login', function(){
+				tryLoginCurrentUser();
+			});
+			
+			//messages as data after coming back from server (stored in sqlite db)
+			socket.on('new message', function(data){
+				displayMsg(data);
+			});
+
+			//replace function to display
+			function transformMsg(msg){
+				msg= msg.replace(/\n/g, "<br/>");
+				msg= msg.replace(/ /g,"&nbsp;");
+				return msg;
+			}
+			//to display data on client
+			function displayMsg(data){	
+     			$chat.append ("<div class=chatMsg><b>" + data.username + "</b>" + "<span class=msgTime>"+data.msgtime + "</span><br/><p>"+ transformMsg(data.msg) +"</p></div>");
+				$chat.scrollTop($chat[0].scrollHeight);
+
+			}
+		});
+	</script>
+</body>
+</html>
